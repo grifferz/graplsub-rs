@@ -1,5 +1,4 @@
 use format_serde_error::SerdeError;
-use rand::RngCore;
 use reqwest::Client;
 use reqwest::StatusCode;
 use serde::Deserialize;
@@ -7,40 +6,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 use thiserror::Error;
 
-// Config from environment.
-#[derive(Debug, Deserialize)]
-struct Config {
-    #[serde(default = "default_base_url")]
-    base_url: String,
-
-    #[serde(skip)]
-    md5_pass_salt: String,
-
-    #[serde(default = "default_num_albums")]
-    num_albums: u16,
-
-    pass: String,
-
-    user: String,
-
-    #[serde(default = "default_playlist_name")]
-    playlist_name: String,
-
-    #[serde(skip)]
-    salt: String,
-}
-
-fn default_base_url() -> String {
-    "http://localhost:4533".to_string()
-}
-
-fn default_playlist_name() -> String {
-    "graplsub_random_albums".to_string()
-}
-
-fn default_num_albums() -> u16 {
-    100
-}
+mod config;
 
 // Structures populated from JSON data.
 #[derive(Debug, Deserialize)]
@@ -129,13 +95,15 @@ pub enum RespParseError {
 
 #[tokio::main]
 async fn main() -> ExitCode {
-    let mut conf = envy::prefixed("GRAPLSUB_").from_env::<Config>().expect(
-        "Please provide all required env vars, minimum GRAPLSUB_PASS \
+    let mut conf = envy::prefixed("GRAPLSUB_")
+        .from_env::<config::Config>()
+        .expect(
+            "Please provide all required env vars, minimum GRAPLSUB_PASS \
             and GRAPLSUB_USER, but see also GRAPLSUB_BASE_URL, GRAPLSUB_NUM_ALBUMS \
             and GRAPLSUB_PLAYLIST_NAME",
-    );
+        );
 
-    build_secrets(&mut conf);
+    config::build_secrets(&mut conf);
 
     if conf.num_albums > 500 {
         eprintln!(
@@ -227,18 +195,6 @@ async fn main() -> ExitCode {
     ExitCode::from(0)
 }
 
-/// Subsonic takes:
-/// - a password and a 3 byte random salt
-/// - encodes the salt as 6 hexadecimal digits
-/// - appends that to the end of the password
-/// - MD5 that string: md5({pass}{salt})
-fn build_secrets(conf: &mut Config) {
-    let mut bytes = [0; 3];
-    rand::rng().fill_bytes(&mut bytes);
-    conf.salt = hex::encode(bytes).to_string();
-    conf.md5_pass_salt = format!("{:x}", md5::compute(format!("{}{}", conf.pass, conf.salt)));
-}
-
 async fn api_get(client: &Client, url: &str) -> Result<(TopLevel, String), ApiError> {
     let response = client
         .get(url)
@@ -268,7 +224,7 @@ async fn api_get(client: &Client, url: &str) -> Result<(TopLevel, String), ApiEr
 
 async fn recreate_playlist(
     client: &Client,
-    conf: &Config,
+    conf: &config::Config,
     api_ver: &str,
 ) -> Result<String, ApiError> {
     let (subsonic_response, json) = playlists(client, conf, api_ver).await?;
@@ -312,7 +268,7 @@ async fn recreate_playlist(
 
 async fn delete_playlist(
     client: &Client,
-    conf: &Config,
+    conf: &config::Config,
     api_ver: &str,
     id: &str,
 ) -> Result<(TopLevel, String), ApiError> {
@@ -336,7 +292,7 @@ fn check_subsonic_delete_playlist_response(
 
 async fn create_playlist(
     client: &Client,
-    conf: &Config,
+    conf: &config::Config,
     api_ver: &str,
 ) -> Result<(TopLevel, String), ApiError> {
     let url = format!(
@@ -366,7 +322,7 @@ fn check_subsonic_create_playlist_response(
 
 async fn add_song(
     client: &Client,
-    conf: &Config,
+    conf: &config::Config,
     api_ver: &str,
     playlist_id: &str,
     song_id: &str,
@@ -388,7 +344,7 @@ fn check_subsonic_add_song_response(resp: &TopLevel, json: &str) -> Result<(), R
 
 async fn playlists(
     client: &Client,
-    conf: &Config,
+    conf: &config::Config,
     api_ver: &str,
 ) -> Result<(TopLevel, String), ApiError> {
     let url = format!(
@@ -453,7 +409,7 @@ fn create_client() -> Result<Client, reqwest::Error> {
 
 async fn random_album_list(
     client: &Client,
-    conf: &Config,
+    conf: &config::Config,
     api_ver: &str,
 ) -> Result<(TopLevel, String), ApiError> {
     let url = format!(
@@ -466,7 +422,7 @@ async fn random_album_list(
 
 async fn get_album(
     client: &Client,
-    conf: &Config,
+    conf: &config::Config,
     api_ver: &str,
     id: &str,
 ) -> Result<(TopLevel, String), ApiError> {
