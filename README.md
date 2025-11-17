@@ -130,6 +130,14 @@ These include:
   tracks.
 - It might be nice to accept command-line arguments or a config file instead
   of just environment variables.
+- Public playlist option? By default new Subsonic playlists are private,
+  meaning only visible to clients logged in using your own credentials. You
+  can make them public and then all other users on your server can see them
+  (only useful if they can also see your library, of course). You can set the
+  playlist public after it's created, but at the moment that setting will be
+  lost when `graplsub` deletes and re-creates the playlist. It wouldn't be
+  hard to add a "public playlist" option, but no one in my house wants to
+  listen to my library by random albums except me! 😀
 - Maybe there would be some use in limiting the playlist length by track count
   or total playtime instead of just album count.
 - It could be good to have an option to exclude "various artists" albums.
