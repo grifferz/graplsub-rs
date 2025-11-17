@@ -63,7 +63,7 @@ pub struct Song {
 #[derive(Debug, Deserialize)]
 pub struct Album {
     id: String,
-    // This one will only be present when the individual album ios requested.
+    // This one will only be present when the individual album is requested.
     song: Option<Vec<Song>>,
 }
 
@@ -131,7 +131,7 @@ pub enum RespParseError {
 async fn main() -> ExitCode {
     let mut conf = envy::prefixed("GRAPLSUB_").from_env::<Config>().expect(
         "Please provide all required env vars, minimum GRAPLSUB_PASS \
-            and GRAPLSUB_USER, but see also GRAPLSUB_BASE)URL, GRAPLSUB_NUM_ALBUMS \
+            and GRAPLSUB_USER, but see also GRAPLSUB_BASE_URL, GRAPLSUB_NUM_ALBUMS \
             and GRAPLSUB_PLAYLIST_NAME",
     );
 
@@ -229,9 +229,9 @@ async fn main() -> ExitCode {
 
 /// Subsonic takes:
 /// - a password and a 3 byte random salt
-/// - encodes the salt as 3 hexadecimal digits
+/// - encodes the salt as 6 hexadecimal digits
 /// - appends that to the end of the password
-/// - MD5 that string: md5({pass}{sat})
+/// - MD5 that string: md5({pass}{salt})
 fn build_secrets(conf: &mut Config) {
     let mut bytes = [0; 3];
     rand::rng().fill_bytes(&mut bytes);
