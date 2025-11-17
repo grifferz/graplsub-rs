@@ -15,6 +15,7 @@ async fn main() -> ExitCode {
             and GRAPLSUB_PLAYLIST_NAME",
         );
 
+    // Generate a random salt and create a token from md5(password+salt).
     config::build_secrets(&mut conf);
 
     if conf.num_albums > 500 {
@@ -29,6 +30,8 @@ async fn main() -> ExitCode {
 
     let client = api::create_client().expect("Failed to create HTTP client");
 
+    // First, check if a playlist with our desired name already exists, and delete it if it does.
+    // Then create a new one.
     let playlist_id = match playlist::recreate(&client, &conf, api_ver).await {
         Ok(id) => id,
         Err(e) => {
@@ -37,6 +40,7 @@ async fn main() -> ExitCode {
         }
     };
 
+    // Get a random list of albums.
     let (subsonic_response, json) = match album::random_list(&client, &conf, api_ver).await {
         Ok(r) => r,
         Err(e) => {
@@ -61,6 +65,7 @@ async fn main() -> ExitCode {
         .unwrap()
         .album
     {
+        // Get the details of each album from the random list.
         for album in albums {
             let (subsonic_response, json) =
                 match album::get(&client, &conf, api_ver, &album.id).await {
@@ -81,6 +86,7 @@ async fn main() -> ExitCode {
 
             // Safe to unwrap() song because we already checked it was Some().
             if let Some(songs) = &subsonic_response.subsonic_response.album.unwrap().song {
+                // For each song on that album, update our playlist to add that song's ID.
                 for song in songs {
                     // eprintln!("Song: {}", song.id);
                     let (subsonic_response, json) =
