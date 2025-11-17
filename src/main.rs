@@ -39,7 +39,7 @@ fn default_playlist_name() -> String {
 }
 
 fn default_num_albums() -> u16 {
-    500
+    100
 }
 
 // Structures populated from JSON data.
