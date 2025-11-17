@@ -1,97 +1,9 @@
-use format_serde_error::SerdeError;
-use reqwest::Client;
-use reqwest::StatusCode;
-use serde::Deserialize;
 use std::process::ExitCode;
-use std::time::Duration;
-use thiserror::Error;
 
+mod album;
+mod api;
 mod config;
-
-// Structures populated from JSON data.
-#[derive(Debug, Deserialize)]
-pub struct Playlist {
-    id: String,
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Playlists {
-    // There'll be an empty "playlists {}" block if there's no playlists.
-    playlist: Option<Vec<Playlist>>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Song {
-    id: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Album {
-    id: String,
-    // This one will only be present when the individual album is requested.
-    song: Option<Vec<Song>>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AlbumList {
-    // There'll be an empty "album {}" block if there's no albums.
-    album: Option<Vec<Album>>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct SubsonicResponse {
-    // This one can only come back after requesting an album.
-    album: Option<Album>,
-    // This won't be here if it wasn't a getAlbumList query.
-    #[serde(rename(deserialize = "albumList"))]
-    album_list: Option<AlbumList>,
-    // Again, this one can only come back after creating a playlist.
-    playlist: Option<Playlist>,
-    // This won't be here if it wasn't a getPlaylists query.
-    playlists: Option<Playlists>,
-    status: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TopLevel {
-    #[serde(rename(deserialize = "subsonic-response"))]
-    subsonic_response: SubsonicResponse,
-}
-
-#[derive(Debug, Error)]
-pub enum ApiError {
-    #[error("Network error: {0}")]
-    Network(#[from] reqwest::Error),
-
-    #[error("Resource not found: {resource}")]
-    NotFound { resource: String },
-
-    #[error("Response parsing error: {0}")]
-    RespParse(#[from] RespParseError),
-
-    // #[error("serde_json error: {0}")]
-    #[error(transparent)]
-    SerdeError(#[from] format_serde_error::SerdeError),
-}
-
-#[derive(Debug, Error)]
-pub enum RespParseError {
-    #[error("Subsonic response was missing an album: {response}")]
-    MissingAlbum { response: String },
-
-    #[error("Subsonic response was missing an albumList: {response}")]
-    MissingAlbumList { response: String },
-
-    #[error("Subsonic response was missing a playlist: {response}")]
-    MissingPlaylist { response: String },
-
-    #[error("Subsonic response was missing a playlists: {response}")]
-    MissingPlaylists { response: String },
-
-    #[error("Subsonic response did not have 'ok' status: {response}")]
-    ResponseNotOk { response: String },
-}
+mod playlist;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -115,9 +27,9 @@ async fn main() -> ExitCode {
 
     let api_ver: &'static str = "1.14.0";
 
-    let client = create_client().expect("Failed to create HTTP client");
+    let client = api::create_client().expect("Failed to create HTTP client");
 
-    let playlist_id = match recreate_playlist(&client, &conf, api_ver).await {
+    let playlist_id = match playlist::recreate(&client, &conf, api_ver).await {
         Ok(id) => id,
         Err(e) => {
             eprintln!("{}", e);
@@ -125,7 +37,7 @@ async fn main() -> ExitCode {
         }
     };
 
-    let (subsonic_response, json) = match random_album_list(&client, &conf, api_ver).await {
+    let (subsonic_response, json) = match album::random_list(&client, &conf, api_ver).await {
         Ok(r) => r,
         Err(e) => {
             eprintln!("{}", e);
@@ -133,7 +45,7 @@ async fn main() -> ExitCode {
         }
     };
 
-    match check_subsonic_albumlist_response(&subsonic_response, &json) {
+    match album::check_list_response(&subsonic_response, &json) {
         Ok(_) => {}
         Err(e) => {
             eprintln!("{}", e);
@@ -151,7 +63,7 @@ async fn main() -> ExitCode {
     {
         for album in albums {
             let (subsonic_response, json) =
-                match get_album(&client, &conf, api_ver, &album.id).await {
+                match album::get(&client, &conf, api_ver, &album.id).await {
                     Ok(r) => r,
                     Err(e) => {
                         eprintln!("{}", e);
@@ -159,7 +71,7 @@ async fn main() -> ExitCode {
                     }
                 };
 
-            match check_subsonic_get_album_response(&subsonic_response, &json) {
+            match album::check_get_response(&subsonic_response, &json) {
                 Ok(_) => {}
                 Err(e) => {
                     eprintln!("{}", e);
@@ -172,7 +84,9 @@ async fn main() -> ExitCode {
                 for song in songs {
                     // eprintln!("Song: {}", song.id);
                     let (subsonic_response, json) =
-                        match add_song(&client, &conf, api_ver, &playlist_id, &song.id).await {
+                        match playlist::update(&client, &conf, api_ver, &playlist_id, &song.id)
+                            .await
+                        {
                             Ok(s) => s,
                             Err(e) => {
                                 eprintln!("{}", e);
@@ -180,7 +94,7 @@ async fn main() -> ExitCode {
                             }
                         };
 
-                    match check_subsonic_add_song_response(&subsonic_response, &json) {
+                    match playlist::check_update_response(&subsonic_response, &json) {
                         Ok(_) => {}
                         Err(e) => {
                             eprintln!("{}", e);
@@ -193,257 +107,4 @@ async fn main() -> ExitCode {
     }
 
     ExitCode::from(0)
-}
-
-async fn api_get(client: &Client, url: &str) -> Result<(TopLevel, String), ApiError> {
-    let response = client
-        .get(url)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await?;
-
-    match response.status() {
-        StatusCode::OK => {
-            let text = response.text().await?;
-            let obj: TopLevel = serde_json::from_str(&text)
-                .map_err(|err| SerdeError::new(text.to_string(), err))?;
-            Ok((obj, text))
-        }
-        StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove the query string as that contains auth info (user,
-            // md5_pass_salt and salt) and isn't the problem here anyway.
-            let mut report_url = response.url().clone();
-            report_url.set_query(None);
-            Err(ApiError::NotFound {
-                resource: report_url.to_string(),
-            })
-        }
-        _ => Err(ApiError::Network(response.error_for_status().unwrap_err())),
-    }
-}
-
-async fn recreate_playlist(
-    client: &Client,
-    conf: &config::Config,
-    api_ver: &str,
-) -> Result<String, ApiError> {
-    let (subsonic_response, json) = playlists(client, conf, api_ver).await?;
-
-    check_subsonic_playlist_response(&subsonic_response, &json)?;
-
-    let mut my_list_id: Option<String> = None;
-
-    // It's safe to unwrap() playlists as this was already chcked, but if there are no playlists
-    // then the "playlist" within it will be None.
-    if let Some(lists) = &subsonic_response
-        .subsonic_response
-        .playlists
-        .unwrap()
-        .playlist
-    {
-        for playlist in lists {
-            if playlist.name == conf.playlist_name {
-                my_list_id = Some(playlist.id.clone());
-                break;
-            }
-        }
-    }
-
-    if let Some(id) = my_list_id {
-        // Our playlist did already exist, so delete it.
-        let (subsonic_response, json) = delete_playlist(client, conf, api_ver, &id).await?;
-
-        check_subsonic_delete_playlist_response(&subsonic_response, &json)?;
-    } else {
-        // Our playlist did NOT already exist, so we can just go ahead and create it as new.
-    }
-
-    let (subsonic_response, json) = create_playlist(client, conf, api_ver).await?;
-
-    check_subsonic_create_playlist_response(&subsonic_response, &json)?;
-
-    // Safe to unwrap() because we already checked that it wasn't None.
-    Ok(subsonic_response.subsonic_response.playlist.unwrap().id)
-}
-
-async fn delete_playlist(
-    client: &Client,
-    conf: &config::Config,
-    api_ver: &str,
-    id: &str,
-) -> Result<(TopLevel, String), ApiError> {
-    let url = format!(
-        "{}/rest/deletePlaylist?u={}&t={}&s={}&f=json&v={}&c=graplsub&id={}",
-        conf.base_url, conf.user, conf.md5_pass_salt, conf.salt, api_ver, id
-    );
-
-    api_get(client, &url).await
-}
-
-fn check_subsonic_delete_playlist_response(
-    resp: &TopLevel,
-    json: &str,
-) -> Result<(), RespParseError> {
-    // An empty response is expected here so just do the basic checks.
-    check_generic_subsonic_response(resp, json)?;
-
-    Ok(())
-}
-
-async fn create_playlist(
-    client: &Client,
-    conf: &config::Config,
-    api_ver: &str,
-) -> Result<(TopLevel, String), ApiError> {
-    let url = format!(
-        "{}/rest/createPlaylist?u={}&t={}&s={}&f=json&v={}&c=graplsub&name={}",
-        conf.base_url, conf.user, conf.md5_pass_salt, conf.salt, api_ver, conf.playlist_name
-    );
-
-    api_get(client, &url).await
-}
-
-fn check_subsonic_create_playlist_response(
-    resp: &TopLevel,
-    json: &str,
-) -> Result<(), RespParseError> {
-    check_generic_subsonic_response(resp, json)?;
-
-    // I think we only need to check that resp.subsonic_response.playlist is not None as
-    // everything else is enforced by the JSON structure.
-    if resp.subsonic_response.playlist.is_none() {
-        return Err(RespParseError::MissingPlaylist {
-            response: json.to_string(),
-        });
-    }
-
-    Ok(())
-}
-
-async fn add_song(
-    client: &Client,
-    conf: &config::Config,
-    api_ver: &str,
-    playlist_id: &str,
-    song_id: &str,
-) -> Result<(TopLevel, String), ApiError> {
-    let url = format!(
-        "{}/rest/updatePlaylist?u={}&t={}&s={}&f=json&v={}&c=graplsub&playlistId={}&songIdToAdd={}",
-        conf.base_url, conf.user, conf.md5_pass_salt, conf.salt, api_ver, playlist_id, song_id
-    );
-
-    api_get(client, &url).await
-}
-
-fn check_subsonic_add_song_response(resp: &TopLevel, json: &str) -> Result<(), RespParseError> {
-    // An empty response is expected here so just do the basic checks.
-    check_generic_subsonic_response(resp, json)?;
-
-    Ok(())
-}
-
-async fn playlists(
-    client: &Client,
-    conf: &config::Config,
-    api_ver: &str,
-) -> Result<(TopLevel, String), ApiError> {
-    let url = format!(
-        "{}/rest/getPlaylists?u={}&t={}&s={}&f=json&v={}&c=graplsub",
-        conf.base_url, conf.user, conf.md5_pass_salt, conf.salt, api_ver
-    );
-
-    api_get(client, &url).await
-}
-
-fn check_generic_subsonic_response(resp: &TopLevel, json: &str) -> Result<(), RespParseError> {
-    if resp.subsonic_response.status != "ok" {
-        return Err(RespParseError::ResponseNotOk {
-            response: json.to_string(),
-        });
-    }
-
-    Ok(())
-}
-
-fn check_subsonic_albumlist_response(resp: &TopLevel, json: &str) -> Result<(), RespParseError> {
-    check_generic_subsonic_response(resp, json)?;
-
-    // I think we only need to check that resp.subsonic_response.album_list is not None as
-    // everything else is enforced by the JSON structure.
-    if resp.subsonic_response.album_list.is_none() {
-        return Err(RespParseError::MissingAlbumList {
-            response: json.to_string(),
-        });
-    }
-
-    Ok(())
-}
-
-fn check_subsonic_playlist_response(resp: &TopLevel, json: &str) -> Result<(), RespParseError> {
-    check_generic_subsonic_response(resp, json)?;
-
-    // I think we only need to check that resp.subsonic_response.playlists is not None as
-    // everything else is enforced by the JSON structure.
-    if resp.subsonic_response.playlists.is_none() {
-        return Err(RespParseError::MissingPlaylists {
-            response: json.to_string(),
-        });
-    }
-
-    Ok(())
-}
-
-fn create_client() -> Result<Client, reqwest::Error> {
-    Client::builder()
-        // Total request timeout
-        .timeout(Duration::from_secs(30))
-        // Connection timeout
-        .connect_timeout(Duration::from_secs(5))
-        // Connection pool timeout
-        .pool_idle_timeout(Duration::from_secs(90))
-        // Max idle connections
-        .pool_max_idle_per_host(10)
-        .user_agent("graplsub/0.1.0")
-        .build()
-}
-
-async fn random_album_list(
-    client: &Client,
-    conf: &config::Config,
-    api_ver: &str,
-) -> Result<(TopLevel, String), ApiError> {
-    let url = format!(
-        "{}/rest/getAlbumList?u={}&t={}&s={}&f=json&v={}&c=graplsub&type=random&size={}",
-        conf.base_url, conf.user, conf.md5_pass_salt, conf.salt, api_ver, conf.num_albums
-    );
-
-    api_get(client, &url).await
-}
-
-async fn get_album(
-    client: &Client,
-    conf: &config::Config,
-    api_ver: &str,
-    id: &str,
-) -> Result<(TopLevel, String), ApiError> {
-    let url = format!(
-        "{}/rest/getAlbum?u={}&t={}&s={}&f=json&v={}&c=graplsub&id={}",
-        conf.base_url, conf.user, conf.md5_pass_salt, conf.salt, api_ver, id
-    );
-
-    api_get(client, &url).await
-}
-
-fn check_subsonic_get_album_response(resp: &TopLevel, json: &str) -> Result<(), RespParseError> {
-    check_generic_subsonic_response(resp, json)?;
-
-    // I think we only need to check that resp.subsonic_response.album is not None as
-    // everything else is enforced by the JSON structure.
-    if resp.subsonic_response.album.is_none() {
-        return Err(RespParseError::MissingAlbum {
-            response: json.to_string(),
-        });
-    }
-
-    Ok(())
 }
