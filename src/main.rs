@@ -239,6 +239,33 @@ fn build_secrets(conf: &mut Config) {
     conf.md5_pass_salt = format!("{:x}", md5::compute(format!("{}{}", conf.pass, conf.salt)));
 }
 
+async fn api_get(client: &Client, url: &str) -> Result<(TopLevel, String), ApiError> {
+    let response = client
+        .get(url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?;
+
+    match response.status() {
+        StatusCode::OK => {
+            let text = response.text().await?;
+            let obj: TopLevel = serde_json::from_str(&text)
+                .map_err(|err| SerdeError::new(text.to_string(), err))?;
+            Ok((obj, text))
+        }
+        StatusCode::NOT_FOUND => {
+            // Take a copy of the URL and remove the query string as that contains auth info (user,
+            // md5_pass_salt and salt) and isn't the problem here anyway.
+            let mut report_url = response.url().clone();
+            report_url.set_query(None);
+            Err(ApiError::NotFound {
+                resource: report_url.to_string(),
+            })
+        }
+        _ => Err(ApiError::Network(response.error_for_status().unwrap_err())),
+    }
+}
+
 async fn recreate_playlist(
     client: &Client,
     conf: &Config,
@@ -294,30 +321,7 @@ async fn delete_playlist(
         conf.base_url, conf.user, conf.md5_pass_salt, conf.salt, api_ver, id
     );
 
-    let response = client
-        .get(url)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await?;
-
-    match response.status() {
-        StatusCode::OK => {
-            let text = response.text().await?;
-            let obj: TopLevel = serde_json::from_str(&text)
-                .map_err(|err| SerdeError::new(text.to_string(), err))?;
-            Ok((obj, text))
-        }
-        StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove the query string as that contains auth info (user,
-            // md5_pass_salt and salt) and isn't the problem here anyway.
-            let mut report_url = response.url().clone();
-            report_url.set_query(None);
-            Err(ApiError::NotFound {
-                resource: report_url.to_string(),
-            })
-        }
-        _ => Err(ApiError::Network(response.error_for_status().unwrap_err())),
-    }
+    api_get(client, &url).await
 }
 
 fn check_subsonic_delete_playlist_response(
@@ -340,30 +344,7 @@ async fn create_playlist(
         conf.base_url, conf.user, conf.md5_pass_salt, conf.salt, api_ver, conf.playlist_name
     );
 
-    let response = client
-        .get(url)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await?;
-
-    match response.status() {
-        StatusCode::OK => {
-            let text = response.text().await?;
-            let obj: TopLevel = serde_json::from_str(&text)
-                .map_err(|err| SerdeError::new(text.to_string(), err))?;
-            Ok((obj, text))
-        }
-        StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove the query string as that contains auth info (user,
-            // md5_pass_salt and salt) and isn't the problem here anyway.
-            let mut report_url = response.url().clone();
-            report_url.set_query(None);
-            Err(ApiError::NotFound {
-                resource: report_url.to_string(),
-            })
-        }
-        _ => Err(ApiError::Network(response.error_for_status().unwrap_err())),
-    }
+    api_get(client, &url).await
 }
 
 fn check_subsonic_create_playlist_response(
@@ -395,30 +376,7 @@ async fn add_song(
         conf.base_url, conf.user, conf.md5_pass_salt, conf.salt, api_ver, playlist_id, song_id
     );
 
-    let response = client
-        .get(url)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await?;
-
-    match response.status() {
-        StatusCode::OK => {
-            let text = response.text().await?;
-            let obj: TopLevel = serde_json::from_str(&text)
-                .map_err(|err| SerdeError::new(text.to_string(), err))?;
-            Ok((obj, text))
-        }
-        StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove the query string as that contains auth info (user,
-            // md5_pass_salt and salt) and isn't the problem here anyway.
-            let mut report_url = response.url().clone();
-            report_url.set_query(None);
-            Err(ApiError::NotFound {
-                resource: report_url.to_string(),
-            })
-        }
-        _ => Err(ApiError::Network(response.error_for_status().unwrap_err())),
-    }
+    api_get(client, &url).await
 }
 
 fn check_subsonic_add_song_response(resp: &TopLevel, json: &str) -> Result<(), RespParseError> {
@@ -438,31 +396,7 @@ async fn playlists(
         conf.base_url, conf.user, conf.md5_pass_salt, conf.salt, api_ver
     );
 
-    let response = client
-        .get(url)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await?;
-
-    match response.status() {
-        StatusCode::OK => {
-            let text = response.text().await?;
-            // eprintln!("{}", text);
-            let obj: TopLevel = serde_json::from_str(&text)
-                .map_err(|err| SerdeError::new(text.to_string(), err))?;
-            Ok((obj, text))
-        }
-        StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove the query string as that contains auth info (user,
-            // md5_pass_salt and salt) and isn't the problem here anyway.
-            let mut report_url = response.url().clone();
-            report_url.set_query(None);
-            Err(ApiError::NotFound {
-                resource: report_url.to_string(),
-            })
-        }
-        _ => Err(ApiError::Network(response.error_for_status().unwrap_err())),
-    }
+    api_get(client, &url).await
 }
 
 fn check_generic_subsonic_response(resp: &TopLevel, json: &str) -> Result<(), RespParseError> {
@@ -527,30 +461,7 @@ async fn random_album_list(
         conf.base_url, conf.user, conf.md5_pass_salt, conf.salt, api_ver, conf.num_albums
     );
 
-    let response = client
-        .get(url)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await?;
-
-    match response.status() {
-        StatusCode::OK => {
-            let text = response.text().await?;
-            let obj: TopLevel = serde_json::from_str(&text)
-                .map_err(|err| SerdeError::new(text.to_string(), err))?;
-            Ok((obj, text))
-        }
-        StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove the query string as that contains auth info (user,
-            // md5_pass_salt and salt) and isn't the problem here anyway.
-            let mut report_url = response.url().clone();
-            report_url.set_query(None);
-            Err(ApiError::NotFound {
-                resource: report_url.to_string(),
-            })
-        }
-        _ => Err(ApiError::Network(response.error_for_status().unwrap_err())),
-    }
+    api_get(client, &url).await
 }
 
 async fn get_album(
@@ -564,30 +475,7 @@ async fn get_album(
         conf.base_url, conf.user, conf.md5_pass_salt, conf.salt, api_ver, id
     );
 
-    let response = client
-        .get(url)
-        .timeout(Duration::from_secs(5))
-        .send()
-        .await?;
-
-    match response.status() {
-        StatusCode::OK => {
-            let text = response.text().await?;
-            let obj: TopLevel = serde_json::from_str(&text)
-                .map_err(|err| SerdeError::new(text.to_string(), err))?;
-            Ok((obj, text))
-        }
-        StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove the query string as that contains auth info (user,
-            // md5_pass_salt and salt) and isn't the problem here anyway.
-            let mut report_url = response.url().clone();
-            report_url.set_query(None);
-            Err(ApiError::NotFound {
-                resource: report_url.to_string(),
-            })
-        }
-        _ => Err(ApiError::Network(response.error_for_status().unwrap_err())),
-    }
+    api_get(client, &url).await
 }
 
 fn check_subsonic_get_album_response(resp: &TopLevel, json: &str) -> Result<(), RespParseError> {
