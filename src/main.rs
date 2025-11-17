@@ -308,7 +308,7 @@ async fn delete_playlist(
             Ok((obj, text))
         }
         StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove thw query string as that contains auth info (user,
+            // Take a copy of the URL and remove the query string as that contains auth info (user,
             // md5_pass_salt and salt) and isn't the problem here anyway.
             let mut report_url = response.url().clone();
             report_url.set_query(None);
@@ -354,7 +354,7 @@ async fn create_playlist(
             Ok((obj, text))
         }
         StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove thw query string as that contains auth info (user,
+            // Take a copy of the URL and remove the query string as that contains auth info (user,
             // md5_pass_salt and salt) and isn't the problem here anyway.
             let mut report_url = response.url().clone();
             report_url.set_query(None);
@@ -409,7 +409,7 @@ async fn add_song(
             Ok((obj, text))
         }
         StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove thw query string as that contains auth info (user,
+            // Take a copy of the URL and remove the query string as that contains auth info (user,
             // md5_pass_salt and salt) and isn't the problem here anyway.
             let mut report_url = response.url().clone();
             report_url.set_query(None);
@@ -453,7 +453,7 @@ async fn playlists(
             Ok((obj, text))
         }
         StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove thw query string as that contains auth info (user,
+            // Take a copy of the URL and remove the query string as that contains auth info (user,
             // md5_pass_salt and salt) and isn't the problem here anyway.
             let mut report_url = response.url().clone();
             report_url.set_query(None);
@@ -541,7 +541,7 @@ async fn random_album_list(
             Ok((obj, text))
         }
         StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove thw query string as that contains auth info (user,
+            // Take a copy of the URL and remove the query string as that contains auth info (user,
             // md5_pass_salt and salt) and isn't the problem here anyway.
             let mut report_url = response.url().clone();
             report_url.set_query(None);
@@ -578,7 +578,7 @@ async fn get_album(
             Ok((obj, text))
         }
         StatusCode::NOT_FOUND => {
-            // Take a copy of the URL and remove thw query string as that contains auth info (user,
+            // Take a copy of the URL and remove the query string as that contains auth info (user,
             // md5_pass_salt and salt) and isn't the problem here anyway.
             let mut report_url = response.url().clone();
             report_url.set_query(None);
